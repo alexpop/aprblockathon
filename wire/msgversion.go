@@ -28,7 +28,7 @@ const DefaultUserAgent = "/btcwire:0.5.0/"
 // communication is allowed to proceed.
 type MsgVersion struct {
 	// Version of the protocol the node is using.
-	ProtocolVersion int32
+	ProtocolVersion uint32
 
 	// Bitfield which identifies the enabled services.
 	Services ServiceFlag
@@ -220,13 +220,12 @@ func (msg *MsgVersion) MaxPayloadLength(pver uint32) uint32 {
 // NewMsgVersion returns a new bitcoin version message that conforms to the
 // Message interface using the passed parameters and defaults for the remaining
 // fields.
-func NewMsgVersion(me *NetAddress, you *NetAddress, nonce uint64,
-	lastBlock int32) *MsgVersion {
+func NewMsgVersion(me *NetAddress, you *NetAddress, nonce uint64, lastBlock int32) *MsgVersion {
 
 	// Limit the timestamp to one second precision since the protocol
 	// doesn't support better.
 	return &MsgVersion{
-		ProtocolVersion: int32(ProtocolVersion),
+		ProtocolVersion: ProtocolVersion,
 		Services:        0,
 		Timestamp:       time.Unix(time.Now().Unix(), 0),
 		AddrYou:         *you,
