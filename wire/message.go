@@ -8,9 +8,11 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"time"
 	"unicode/utf8"
 
-	"github.com/btcsuite/btcd/chaincfg/chainhash"
+	"github.com/alexpop/aprblockathon/chaincfg/chainhash"
+	sha3 "github.com/ethereumproject/go-ethereum/crypto/sha3"
 )
 
 // MessageHeaderSize is the number of bytes in a bitcoin message header.
@@ -170,6 +172,11 @@ type messageHeader struct {
 	checksum [4]byte    // 4 bytes
 }
 
+type intAndErr struct {
+	zaInt int
+	zaErr error
+}
+
 // readMessageHeader reads a bitcoin message header from r.
 func readMessageHeader(r io.Reader) (int, *messageHeader, error) {
 	// Since readElements doesn't return the amount of bytes read, attempt
@@ -177,12 +184,28 @@ func readMessageHeader(r io.Reader) (int, *messageHeader, error) {
 	// short read so the proper amount of read bytes are known.  This works
 	// since the header is a fixed size.
 	var headerBytes [MessageHeaderSize]byte
-	n, err := io.ReadFull(r, headerBytes[:])
-	if err != nil {
-		return n, nil, err
-	}
-	hr := bytes.NewReader(headerBytes[:])
 
+	var n int
+	c1 := make(chan intAndErr, 1)
+	go func() {
+		n, err := io.ReadFull(r, headerBytes[:])
+		c1 <- intAndErr{
+			zaInt: n,
+			zaErr: err,
+		}
+	}()
+
+	select {
+	case res := <-c1:
+		if res.zaErr != nil {
+			return n, nil, res.zaErr
+		}
+		n = res.zaInt
+	case <-time.After(30 * time.Second):
+		return n, nil, fmt.Errorf("Timeout waiting from peer response... SHOULD NEVER HIT THIS IF TIMEOUT IS < 30")
+	}
+
+	hr := bytes.NewReader(headerBytes[:])
 	// Create and populate a messageHeader struct from the raw header bytes.
 	hdr := messageHeader{}
 	var command [CommandSize]byte
@@ -193,6 +216,7 @@ func readMessageHeader(r io.Reader) (int, *messageHeader, error) {
 
 	return n, &hdr, nil
 }
+
 
 // discardInput reads n bytes from reader r in chunks and discards the read
 // bytes.  This is used to skip payloads when various errors occur and helps
@@ -229,6 +253,15 @@ func WriteMessageN(w io.Writer, msg Message, pver uint32, btcnet BitcoinNet) (in
 func WriteMessage(w io.Writer, msg Message, pver uint32, btcnet BitcoinNet) error {
 	_, err := WriteMessageN(w, msg, pver, btcnet)
 	return err
+}
+
+// Keccak256 calculates and returns the Keccak256 hash of the input data.
+func Keccak256(data ...[]byte) []byte {
+	d := sha3.NewKeccak256()
+	for _, b := range data {
+		d.Write(b)
+	}
+	return d.Sum(nil)
 }
 
 // WriteMessageWithEncodingN writes a bitcoin Message to w including the
@@ -282,7 +315,12 @@ func WriteMessageWithEncodingN(w io.Writer, msg Message, pver uint32,
 	hdr.magic = btcnet
 	hdr.command = cmd
 	hdr.length = uint32(lenp)
+
 	copy(hdr.checksum[:], chainhash.DoubleHashB(payload)[0:4])
+	//copy(hdr.checksum[:], Keccak256(payload)[0:4])
+
+	// fmt.Printf("checksum default: 0x%02x\n", hdr.checksum)
+	// fmt.Printf("checksum keccak: 0x%02x\n", Keccak256(payload)[0:4])
 
 	// Encode the header for the message.  This is done to a buffer
 	// rather than directly to the writer since writeElements doesn't
@@ -309,8 +347,7 @@ func WriteMessageWithEncodingN(w io.Writer, msg Message, pver uint32,
 // comprise the message.  This function is the same as ReadMessageN except it
 // allows the caller to specify which message encoding is to to consult when
 // decoding wire messages.
-func ReadMessageWithEncodingN(r io.Reader, pver uint32, btcnet BitcoinNet,
-	enc MessageEncoding) (int, Message, []byte, error) {
+func ReadMessageWithEncodingN(r io.Reader, pver uint32, btcnet BitcoinNet, enc MessageEncoding) (int, Message, []byte, error) {
 
 	totalBytes := 0
 	n, hdr, err := readMessageHeader(r)
@@ -318,6 +355,9 @@ func ReadMessageWithEncodingN(r io.Reader, pver uint32, btcnet BitcoinNet,
 	if err != nil {
 		return totalBytes, nil, nil, err
 	}
+
+	// log line useful for troubleshooting what we get back
+	// fmt.Printf(" * Received message with command '%s' and payload size: %d\n", hdr.command, hdr.length)
 
 	// Enforce maximum message payload.
 	if hdr.length > MaxMessagePayload {

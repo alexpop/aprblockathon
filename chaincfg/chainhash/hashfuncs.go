@@ -7,6 +7,8 @@ package chainhash
 
 import "crypto/sha256"
 
+
+
 // HashB calculates hash(b) and returns the resulting bytes.
 func HashB(b []byte) []byte {
 	hash := sha256.Sum256(b)
@@ -20,6 +22,7 @@ func HashH(b []byte) Hash {
 
 // DoubleHashB calculates hash(hash(b)) and returns the resulting bytes.
 func DoubleHashB(b []byte) []byte {
+	//first := shababe.NewLegacyKeccak256()
 	first := sha256.Sum256(b)
 	second := sha256.Sum256(first[:])
 	return second[:]
